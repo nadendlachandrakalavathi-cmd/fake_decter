@@ -3,3 +3,5 @@ numpy
 pillow
 transformers
 torch
+pandas
+reruests
