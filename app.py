@@ -356,7 +356,16 @@ def ai_text_check(text):
 @st.cache_resource
 def load_deepfake_model():
     from transformers import pipeline
-    return pipeline("image-classification", model="dima806/deepfake_vs_real_image_detection")
+
+    model_name = "prithivMLmods/AI-vs-Deepfake-vs-Real"
+
+    detector = pipeline(
+        "image-classification",
+        model=model_name,
+        device=-1
+    )
+
+    return detector
 
 
 def exif_signal(pil_image):
@@ -493,108 +502,222 @@ with tabs[5]:
 
 # ---- Tab 7
 with tabs[6]:
-    st.subheader("Deepfake image detector")
-    st.caption("Prototype using a pretrained model. Not 100% accurate.")
+
+    st.subheader("🛡️ TrustShield Image Authenticity Detector")
+
+    st.caption(
+        "AI-powered screening for real, AI-generated, and deepfake images. "
+        "Results are estimates and should not be treated as absolute proof."
+    )
 
     up = st.file_uploader(
-        "Upload a face photo",
-        type=["jpg", "jpeg", "png"],
-        key="df_in"
+        "Upload an image",
+        type=["jpg", "jpeg", "png", "webp"],
+        key="trustshield_detector"
     )
 
     if up:
 
         st.session_state.checks_run += 1
 
-        raw_image = Image.open(up)
+        image = Image.open(up).convert("RGB")
 
-        has_exif = exif_signal(raw_image)
+        st.image(
+            image,
+            caption="Uploaded image",
+            width=350
+        )
 
-        image = raw_image.convert("RGB")
+        # -----------------------------
+        # BASIC IMAGE INFORMATION
+        # -----------------------------
 
-        st.image(image, width=300)
+        width, height = image.size
+
+        st.write(f"**Image size:** {width} × {height}")
+
+        # -----------------------------
+        # CAMERA METADATA
+        # -----------------------------
+
+        try:
+            metadata = image.getexif()
+
+            if metadata and len(metadata) > 0:
+                metadata_found = True
+            else:
+                metadata_found = False
+
+        except Exception:
+            metadata_found = False
+
+        if metadata_found:
+            st.write("📷 **Camera metadata:** Found")
+        else:
+            st.write("📷 **Camera metadata:** Not found")
+
+        # -----------------------------
+        # AI DETECTION
+        # -----------------------------
 
         try:
 
-            with st.spinner("Analyzing image..."):
+            with st.spinner("Analyzing image with TrustShield AI..."):
 
-                preds = load_deepfake_model()(image)
+                detector = load_deepfake_model()
 
+                predictions = detector(image)
+
+            # Sort highest probability first
+            predictions = sorted(
+                predictions,
+                key=lambda x: x["score"],
+                reverse=True
+            )
+
+            top = predictions[0]
+
+            label = top["label"]
+            confidence = float(top["score"])
+
+            # -----------------------------
+            # DISPLAY ALL SCORES
+            # -----------------------------
+
+            st.markdown("### 🔍 Detection Analysis")
+
+            artificial_score = 0.0
+            deepfake_score = 0.0
             real_score = 0.0
-            fake_score = 0.0
 
-            for p in preds:
+            for p in predictions:
 
-                label = p["label"].lower()
+                current_label = p["label"].lower()
                 score = float(p["score"])
 
-                if "fake" in label or "deepfake" in label:
-                    fake_score = score
+                if "artificial" in current_label:
+                    artificial_score = score
 
-                elif "real" in label:
+                elif "deepfake" in current_label:
+                    deepfake_score = score
+
+                elif "real" in current_label:
                     real_score = score
 
-            total = real_score + fake_score
+            # -----------------------------
+            # FINAL RESULT
+            # -----------------------------
 
-            if total > 0:
-                real_score = real_score / total
-                fake_score = fake_score / total
+            if "artificial" in label.lower():
 
-            real_percent = real_score * 100
-            fake_percent = fake_score * 100
+                st.error("🔴 Potentially AI-Generated")
 
-            if fake_percent >= 65:
-                verdict_text = "🔴 Likely AI-generated / Fake"
+                result_text = (
+                    "The model found patterns associated "
+                    "with an AI-generated image."
+                )
 
-            elif fake_percent >= 35:
-                verdict_text = "🟡 Mixed Signal"
+            elif "deepfake" in label.lower():
 
-            else:
-                verdict_text = "🟢 Likely Real"
+                st.error("🔴 Potential Deepfake / Manipulated Image")
 
-            confidence = max(real_percent, fake_percent)
-
-            st.subheader(verdict_text)
-
-            st.write(
-                f"**Model confidence:** {confidence:.1f}%"
-            )
-
-            st.write(
-                f"**Camera metadata found:** "
-                f"{'Yes' if has_exif else 'No'}"
-            )
-
-            st.write(f"**Real:** {real_percent:.1f}%")
-            st.progress(real_percent / 100)
-
-            st.write(f"**Fake:** {fake_percent:.1f}%")
-            st.progress(fake_percent / 100)
-
-            if has_exif:
-
-                st.caption(
-                    "Camera metadata was found. "
-                    "This supports authenticity but does not prove the image is real."
+                result_text = (
+                    "The model found patterns associated "
+                    "with a manipulated or deepfake image."
                 )
 
             else:
 
-                st.caption(
-                    "No camera metadata found. "
-                    "This does not mean the image is fake."
+                st.success("🟢 Likely Authentic Photograph")
+
+                result_text = (
+                    "The model found the image more consistent "
+                    "with the real-image class."
                 )
+
+            st.write(result_text)
+
+            st.write(
+                f"**Model confidence: {confidence * 100:.1f}%**"
+            )
+
+            # -----------------------------
+            # SCORE BREAKDOWN
+            # -----------------------------
+
+            st.markdown("### 📊 Probability Breakdown")
+
+            st.write(
+                f"**Real:** {real_score * 100:.1f}%"
+            )
+            st.progress(real_score)
+
+            st.write(
+                f"**AI-Generated:** {artificial_score * 100:.1f}%"
+            )
+            st.progress(artificial_score)
+
+            st.write(
+                f"**Deepfake:** {deepfake_score * 100:.1f}%"
+            )
+            st.progress(deepfake_score)
+
+            # -----------------------------
+            # IMAGE TYPE / TRUST LEVEL
+            # -----------------------------
+
+            st.markdown("### 🛡️ TrustShield Assessment")
+
+            fake_probability = artificial_score + deepfake_score
+
+            if fake_probability >= 0.80:
+
+                st.error(
+                    "🚨 HIGH RISK — Possible manipulated or AI-generated image"
+                )
+
+            elif fake_probability >= 0.45:
+
+                st.warning(
+                    "⚠️ MEDIUM RISK — Image requires additional verification"
+                )
+
+            else:
+
+                st.success(
+                    "🟢 LOW RISK — Image is more consistent with an authentic image"
+                )
+
+            # -----------------------------
+            # METADATA WARNING
+            # -----------------------------
+
+            if not metadata_found:
+
+                st.info(
+                    "ℹ️ No camera metadata was found. "
+                    "This does NOT mean the image is fake. "
+                    "Social media platforms, screenshots and editing software "
+                    "can remove metadata."
+                )
+
+            # -----------------------------
+            # IMPORTANT DISCLAIMER
+            # -----------------------------
 
             st.caption(
-                "TrustShield uses a pretrained AI model. "
-                "The result is an estimate, not absolute proof."
+                "TrustShield provides an AI-based risk estimate. "
+                "It cannot guarantee that an image is real or fake."
             )
 
         except Exception as e:
 
             st.error(
-                "Deepfake model could not be loaded. "
-                "Please check your installed packages and internet connection."
+                "❌ TrustShield detector could not analyze this image."
             )
 
-            st.error(str(e))
+            st.write(
+                "Please check the installed packages and internet connection."
+            )
+
+            st.caption(str(e)[:500])
